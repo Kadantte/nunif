@@ -30,6 +30,13 @@ iw3.desktop is a tool that converts your PC desktop screen into 3D and streaming
 
 You can watch any image and video/live displayed on your PC as 3D in realtime.
 
+### iw3-player
+
+[iw3/player/README.md](./iw3/player/README.md)
+
+iw3-player is a self-hosted, specialized viewing environment for stereoscopic media.  
+It allows you to stream media that has been pre-converted to 3D with iw3 from your PC and enjoy it on VR devices through a WebXR application.
+
 ## stilizer
 
 [stlizer/README.md](./stlizer/README.md)
@@ -72,7 +79,9 @@ We usually support the latest version. If there are bugs or compatibility issues
 - [INSTALL-windows](INSTALL-windows.md)
 - [INSTALL-macos](INSTALL-macos.md)
 
-For Intel GPUs, additionally see section [INSTALL-xpu](INSTALL-xpu.md).
+For Intel GPUs, additionally see section [INSTALL-xpu](INSTALL-xpu.md).  
+For older NVIDIA GPUs, additionally see section [INSTALL-cu126](INSTALL-cu126.md).
+
 
 For container, packages, or special hardware builds, see [extra_build](extra_build).
 

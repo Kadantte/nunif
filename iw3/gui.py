@@ -50,6 +50,7 @@ from .video_depth_anything_model import (
 from .video_depth_anything_streaming_model import VideoDepthAnythingStreamingModel, AA_SUPPORT_MODELS as VDA_STREAM_AA_SUPPORTED_MODELS
 from .depth_anything_v3_model import AA_SUPPORTED_MODELS as DA3_AA_SUPPORTED_MODELS
 from .depth_pro_model import MODEL_FILES as DEPTH_PRO_MODELS
+from .zoedepth_model import MODEL_FILES as ZOEDPETH_MODELS
 from . import export_config
 from .inpaint_utils import INPAINT_MODELS
 
@@ -114,6 +115,7 @@ class MainFrame(wx.Frame):
         self.depth_model_type = None
         self.depth_model_device_id = None
         self.depth_model_height = None
+        self.depth_model_limit_resolution = None
         self.initialize_component()
         if is_dark_mode():
             apply_dark_mode(self)
@@ -149,6 +151,12 @@ class MainFrame(wx.Frame):
                                          name="chk_recursive")
         self.chk_recursive.SetValue(False)
 
+        self.chk_skip_error = wx.CheckBox(self.pnl_file_option, label=T("Skip Error"), name="chk_skip_erro")
+        self.chk_skip_error.SetToolTip(T("Skip videos that cause errors during batch processing and those that previously encountered errors."))
+        self.chk_skip_error.SetValue(False)
+
+        self.sep_batch_options = wx.StaticLine(self.pnl_file_option, size=self.FromDIP((2, 16)), style=wx.LI_VERTICAL)
+
         self.chk_exif_transpose = wx.CheckBox(self.pnl_file_option, label=T("EXIF Transpose"),
                                               name="chk_exif_transpose")
         self.chk_exif_transpose.SetValue(True)
@@ -170,6 +178,8 @@ class MainFrame(wx.Frame):
         layout.AddSpacer(4)
         layout.Add(self.chk_resume, flag=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.chk_recursive, flag=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
+        layout.Add(self.chk_skip_error, flag=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
+        layout.Add(self.sep_batch_options, flag=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.chk_exif_transpose, flag=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.chk_metadata, flag=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.sep_image_format, flag=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
@@ -200,7 +210,12 @@ class MainFrame(wx.Frame):
         self.cbo_divergence.SetSelection(4)
 
         self.lbl_convergence = wx.StaticText(self.grp_stereo, label=T("Convergence Plane"))
-        self.cbo_convergence = EditableComboBox(self.grp_stereo, choices=["0.0", "0.5", "1.0"],
+        self.cbo_convergence_mode = wx.ComboBox(self.grp_stereo, choices=["constant", "sod_v1"],
+                                                name="cbo_convergence_mode")
+        self.cbo_convergence_mode.SetEditable(False)
+        self.cbo_convergence_mode.SetSelection(0)
+
+        self.cbo_convergence = EditableComboBox(self.grp_stereo, choices=["0.0", "0.25", "0.5", "1.0"],
                                                 name="cbo_convergence")
         self.cbo_convergence.SetSelection(1)
         self.cbo_convergence.SetToolTip("Convergence")
@@ -253,6 +268,10 @@ class MainFrame(wx.Frame):
                                                choices=["Default", "512"],
                                                name="cbo_zoed_resolution")
         self.cbo_resolution.SetSelection(0)
+
+        self.chk_limit_resolution = wx.CheckBox(self.grp_stereo, label=T("Limit to source"),
+                                                name="chk_limit_resolution")
+        self.chk_limit_resolution.SetToolTip(T("Limit to source resolution"))
 
         self.lbl_foreground_scale = wx.StaticText(self.grp_stereo, label=T("Foreground Scale"))
         self.cbo_foreground_scale = EditableComboBox(self.grp_stereo,
@@ -317,6 +336,11 @@ class MainFrame(wx.Frame):
         self.chk_scene_detect.SetValue(False)
         self.chk_scene_detect.SetToolTip(T("Reset model and Flicker Reduction states at scene boundaries"))
 
+        self.chk_scene_detect_cache = wx.CheckBox(self.grp_stereo,
+                                                  label=T("Use scene boundary cache"),
+                                                  name="chk_scene_detect_cache")
+        self.chk_scene_detect_cache.SetValue(True)
+
         self.chk_preserve_screen_border = wx.CheckBox(self.grp_stereo,
                                                       label=T("Preserve Screen Border"),
                                                       name="chk_preserve_screen_border")
@@ -373,7 +397,9 @@ class MainFrame(wx.Frame):
         layout.Add(self.cbo_divergence, (i, 1), (1, 2), flag=wx.EXPAND)
         layout.Add(self.lbl_divergence_warning, pos=(i := i + 1, 0), span=(0, 3), flag=wx.EXPAND | wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.lbl_convergence, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        layout.Add(self.cbo_convergence, (i, 1), (1, 2), flag=wx.EXPAND)
+        layout.Add(self.cbo_convergence_mode, (i, 1), flag=wx.EXPAND)
+        layout.Add(self.cbo_convergence, (i, 2), flag=wx.EXPAND)
+
         layout.Add(self.lbl_ipd_offset, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.sld_ipd_offset, (i, 1), (1, 2), flag=wx.EXPAND)
         layout.Add(self.lbl_synthetic_view, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
@@ -392,7 +418,9 @@ class MainFrame(wx.Frame):
         layout.Add(self.lbl_depth_model, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.cbo_depth_model, (i, 1), (1, 2), flag=wx.EXPAND)
         layout.Add(self.lbl_resolution, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        layout.Add(self.cbo_resolution, (i, 1), (1, 2), flag=wx.EXPAND)
+        layout.Add(self.cbo_resolution, (i, 1), flag=wx.EXPAND)
+        layout.Add(self.chk_limit_resolution, (i, 2), flag=wx.EXPAND)
+
         layout.Add(self.lbl_foreground_scale, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.cbo_foreground_scale, (i, 1), (1, 2), flag=wx.EXPAND)
         layout.Add(self.lbl_edge_dilation, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
@@ -402,7 +430,8 @@ class MainFrame(wx.Frame):
         layout.Add(self.chk_ema_normalize, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.cbo_ema_decay, (i, 1), flag=wx.EXPAND)
         layout.Add(self.cbo_ema_buffer, (i, 2), flag=wx.EXPAND)
-        layout.Add(self.chk_scene_detect, (i := i + 1, 0), (0, 3), flag=wx.ALIGN_CENTER_VERTICAL)
+        layout.Add(self.chk_scene_detect, (i := i + 1, 0), (0, 1), flag=wx.ALIGN_CENTER_VERTICAL)
+        layout.Add(self.chk_scene_detect_cache, (i, 1), (1, 2), flag=wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.chk_preserve_screen_border, (i := i + 1, 0), (0, 3), flag=wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.lbl_stereo_format, (i := i + 1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
         layout.Add(self.cbo_stereo_format, (i, 1), (1, 2), flag=wx.EXPAND)
@@ -463,6 +492,7 @@ class MainFrame(wx.Frame):
         self.cbo_max_output_size = wx.ComboBox(self.grp_video_filter,
                                                choices=["",
                                                         "7680x2160",
+                                                        "3840x1080",
                                                         "1920x1080", "1280x720", "640x360",
                                                         "1080x1920", "720x1280", "360x640"],
                                                name="cbo_max_output_size")
@@ -892,6 +922,11 @@ class MainFrame(wx.Frame):
             self.cbo_resolution.Enable()
             self.chk_fp16.Enable()
 
+        if name in ZOEDPETH_MODELS or name in DEPTH_PRO_MODELS:
+            self.chk_limit_resolution.Disable()
+        else:
+            self.chk_limit_resolution.Enable()
+
         if (
                 name in DA_AA_SUPPORTED_MODELS or
                 name in VDA_AA_SUPPORTED_MODELS or
@@ -987,11 +1022,7 @@ class MainFrame(wx.Frame):
             self.cbo_ema_buffer.Disable()
 
     def update_scene_segment(self, *args, **kwargs):
-        if self.chk_ema_normalize.IsChecked():
-            self.chk_scene_detect.Enable()
-        else:
-            if not VideoDepthAnythingModel.supported(self.cbo_depth_model.GetValue()):
-                self.chk_scene_detect.Disable()
+        pass
 
     def on_changed_chk_ema_normalize(self, event):
         self.update_ema_normalize()
@@ -1085,6 +1116,7 @@ class MainFrame(wx.Frame):
                 self.show_validation_error_message(T("Depth") + " " + T("Resolution"), 224, 8190)
                 return
             resolution = int(resolution)
+        limit_resolution = self.chk_limit_resolution.IsChecked()
 
         stereo_width = self.cbo_stereo_width.GetValue()
         if stereo_width == "Default" or stereo_width == "":
@@ -1148,10 +1180,13 @@ class MainFrame(wx.Frame):
         depth_model_type = self.cbo_depth_model.GetValue()
         if (self.depth_model is None or (self.depth_model_type != depth_model_type or
                                          self.depth_model_device_id != device_id or
-                                         self.depth_model_height != resolution)):
+                                         self.depth_model_height != resolution or
+                                         self.depth_model_limit_resolution != limit_resolution)):
             self.depth_model = None
             self.depth_model_type = None
             self.depth_model_device_id = None
+            self.depth_model_height = None
+            self.depth_model_limit_resolution = None
             gc_collect()
 
         max_output_width = max_output_height = None
@@ -1162,6 +1197,7 @@ class MainFrame(wx.Frame):
         input_path = self.pnl_file.input_path
         resume = self.chk_resume.IsEnabled() and self.chk_resume.GetValue()
         recursive = path.isdir(input_path) and self.chk_recursive.GetValue()
+        skip_error = self.chk_skip_error.IsEnabled() and self.chk_skip_error.GetValue()
         start_time = self.txt_start_time.GetValue() if self.chk_start_time.GetValue() else None
         end_time = self.txt_end_time.GetValue() if self.chk_end_time.GetValue() else None
 
@@ -1193,7 +1229,8 @@ class MainFrame(wx.Frame):
 
         metadata = "filename" if self.chk_metadata.GetValue() else None
         preserve_screen_border = self.chk_preserve_screen_border.IsEnabled() and self.chk_preserve_screen_border.IsChecked()
-        scene_detect = self.chk_scene_detect.IsEnabled() and self.chk_scene_detect.IsChecked()
+        scene_detect = self.chk_scene_detect.IsChecked()
+        disable_scene_cache = not self.chk_scene_detect_cache.IsChecked()
         depth_aa = self.chk_depth_aa.IsShown() and self.chk_depth_aa.IsEnabled() and self.chk_depth_aa.IsChecked()
 
         parser.set_defaults(
@@ -1203,6 +1240,7 @@ class MainFrame(wx.Frame):
 
             divergence=float(self.cbo_divergence.GetValue()),
             convergence=float(self.cbo_convergence.GetValue()),
+            convergence_mode=self.cbo_convergence_mode.GetValue(),
             ipd_offset=float(self.sld_ipd_offset.GetValue()),
             synthetic_view=self.cbo_synthetic_view.GetValue(),
             method=self.cbo_method.GetValue(),
@@ -1232,6 +1270,7 @@ class MainFrame(wx.Frame):
             debug_depth=debug_depth,
             **ema_options,
             scene_detect=scene_detect,
+            disable_scene_cache=disable_scene_cache,
 
             format=self.cbo_image_format.GetValue(),
 
@@ -1259,6 +1298,7 @@ class MainFrame(wx.Frame):
             gpu=device_id,
             batch_size=int(self.cbo_batch_size.GetValue()),
             resolution=resolution,
+            limit_resolution=limit_resolution,
             stereo_width=stereo_width,
             max_workers=int(self.cbo_max_workers.GetValue()),
             tta=self.chk_tta.GetValue(),
@@ -1269,6 +1309,7 @@ class MainFrame(wx.Frame):
 
             resume=resume,
             recursive=recursive,
+            skip_error=skip_error,
             metadata=metadata,
             start_time=start_time,
             end_time=end_time,
@@ -1316,6 +1357,7 @@ class MainFrame(wx.Frame):
             self.depth_model_type = args.depth_model
             self.depth_model_device_id = args.gpu
             self.depth_model_height = args.resolution
+            self.depth_model_limit_resolution = args.limit_resolution
 
             if not self.stop_event.is_set():
                 self.prg_tqdm.SetValue(self.prg_tqdm.GetRange())
